@@ -2,7 +2,7 @@
 if _G.XresLoaded then return end
 _G.XresLoaded = true
 
-print("🎯 Xres Loading...")
+print("🎯 Xres 1.0.0 Loading...")
 
 -- Services
 local Players = game:GetService("Players")
@@ -116,6 +116,7 @@ end
 -- Premium UI
 local MainWindow, TitleBar, ContentFrame
 local IsUIVisible = true
+local CurrentTab = "Player"
 
 function CreateXresUI()
     if CoreGui:FindFirstChild("XresUI") then
@@ -173,7 +174,7 @@ function CreateXresUI()
     Title.Size = UDim2.new(0, 120, 1, 0)
     Title.Position = UDim2.new(0, 20, 0, 0)
     Title.BackgroundTransparency = 1
-    Title.Text = "XRES"
+    Title.Text = "Xres | Version 1.0.0"
     Title.TextColor3 = Color3.fromRGB(100, 180, 255)
     Title.TextSize = 20
     Title.Font = Enum.Font.GothamBlack
@@ -209,9 +210,9 @@ function CreateXresUI()
         tabButton.Size = UDim2.new(1/#tabs, -8, 1, 0)
         tabButton.Position = UDim2.new((i-1)/#tabs, 0, 0, 0)
         tabButton.BackgroundColor3 = tab.Name == "Player" and Color3.fromRGB(60, 120, 255) or Color3.fromRGB(40, 45, 60)
-        tabButton.Text = tab.Icon
+        tabButton.Text = tab.Name
         tabButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-        tabButton.TextSize = 14
+        tabButton.TextSize = 12
         tabButton.Font = Enum.Font.GothamBold
         tabButton.Parent = TabContainer
 
@@ -226,6 +227,7 @@ function CreateXresUI()
 
     -- Tab Content
     local TabContent = Instance.new("Frame")
+    TabContent.Name = "TabContent"
     TabContent.Size = UDim2.new(1, 0, 1, -45)
     TabContent.Position = UDim2.new(0, 0, 0, 45)
     TabContent.BackgroundTransparency = 1
@@ -296,15 +298,26 @@ function CreateXresUI()
 end
 
 function SwitchTab(tabName)
-    for _, tab in pairs(ContentFrame:FindFirstChild("TabContent"):GetChildren()) do
-        if tab:IsA("Frame") then
+    CurrentTab = tabName
+    
+    -- Hide all tabs
+    for _, tab in pairs(ContentFrame.TabContent:GetChildren()) do
+        if tab:IsA("ScrollingFrame") then
             tab.Visible = false
         end
     end
     
+    -- Show selected tab
     local targetTab = ContentFrame.TabContent:FindFirstChild(tabName .. "Tab")
     if targetTab then
         targetTab.Visible = true
+    end
+    
+    -- Update tab buttons colors
+    for _, tabButton in pairs(ContentFrame:FindFirstChild("TabContainer"):GetChildren()) do
+        if tabButton:IsA("TextButton") then
+            tabButton.BackgroundColor3 = tabButton.Text == tabName and Color3.fromRGB(60, 120, 255) or Color3.fromRGB(40, 45, 60)
+        end
     end
 end
 
@@ -563,19 +576,8 @@ function CreateTeleportTab(parent)
                 end)
             end
         end
-
-        menuList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-            menuScroll.CanvasSize = UDim2.new(0, 0, 0, menuList.AbsoluteContentSize.Y)
-        end)
-    end)
-
-    teleportButton.MouseButton1Click:Connect(function()
-        if selectedPlayer then
-            TeleportToPlayer(selectedPlayer)
-        end
-    end)
-
-    list:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+            
+list:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
         tab.CanvasSize = UDim2.new(0, 0, 0, list.AbsoluteContentSize.Y)
     end)
 end
@@ -649,19 +651,19 @@ LocalPlayer.CharacterAdded:Connect(function(newChar)
     if Xres.InfinityJump then EnableInfinityJump() end
     if Xres.AntiAFK then EnableAntiAFK() end
     if Xres.GodMode then EnableGodMode() end
-end)
+end
 
 -- Auto God Mode
 game:GetService("ReplicatedStorage").DescendantAdded:Connect(function(obj)
     if Xres.GodMode and obj.Name == "VitalityBridge" then
         obj:Destroy()
     end
-end)
+end
 
 -- Initialize
 wait(1)
 CreateXresUI()
 Humanoid.WalkSpeed = Xres.WalkSpeed
 
-print("✅ Xres Loaded!")
+print("✅ Xres 1.0.0 Loaded!")
 return Xres
