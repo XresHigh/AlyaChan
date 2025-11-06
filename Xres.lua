@@ -2,9 +2,9 @@
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
-   Name = "Xres Premium",
-   LoadingTitle = "Xres 1.0.0 Loading...",
-   LoadingSubtitle = "Premium Script Hub",
+   Name = "Xres",
+   LoadingTitle = "1.0.0 Loading...",
+   LoadingSubtitle = "XresHub",
    ConfigurationSaving = {
       Enabled = true,
       FolderName = "XresConfig",
@@ -493,9 +493,9 @@ if Humanoid then
 end
 
 Rayfield:Notify({
-    Title = "Xres Premium",
+    Title = "Xres",
     Content = "Successfully loaded!",
     Duration = 3
 })
 
-print("✅ Xres Premium 1.0.0 Loaded with Rayfield!")
+print("✅ Xres 1.0.0 Loaded")
