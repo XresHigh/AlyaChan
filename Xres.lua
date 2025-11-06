@@ -1,8 +1,8 @@
--- Xres 1.0.0 - Organized Tab System
+-- Xres 1.0.0 - Clean Version
 if _G.XresLoaded then return end
 _G.XresLoaded = true
 
-print("🎯 Xres 1.0.0 Premium Loading...")
+print("🎯 Xres 1.0.0 Loading...")
 
 -- Services
 local Players = game:GetService("Players")
@@ -10,8 +10,6 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
 local TweenService = game:GetService("TweenService")
-local TeleportService = game:GetService("TeleportService")
-local HttpService = game:GetService("HttpService")
 
 -- Player
 local LocalPlayer = Players.LocalPlayer
@@ -27,56 +25,13 @@ local Xres = {
         NoClip = false,
         GodMode = false,
         InfinityJump = false,
-        AntiAFK = false,
-        WaterWalk = false,
-        AutoServerHop = false
+        AntiAFK = false
     }
 }
 
 -- Variables
 local Connections = {}
 local ESPHighlights = {}
-local WaterParts = {}
-
--- 🌊 Water Walk
-function EnableWaterWalk()
-    WaterParts = {}
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if obj:IsA("Part") and (obj.Name:lower():find("water") or obj.Material == Enum.Material.Water) then
-            table.insert(WaterParts, obj)
-        end
-    end
-    
-    Connections.WaterWalk = RunService.Heartbeat:Connect(function()
-        if Character and RootPart then
-            local charPos = RootPart.Position
-            for _, waterPart in pairs(WaterParts) do
-                local waterPos = waterPart.Position
-                local waterSize = waterPart.Size
-                
-                if charPos.Y > waterPos.Y and 
-                   math.abs(charPos.X - waterPos.X) < waterSize.X/2 and
-                   math.abs(charPos.Z - waterPos.Z) < waterSize.Z/2 then
-                    
-                    RootPart.Velocity = Vector3.new(RootPart.Velocity.X, 0, RootPart.Velocity.Z)
-                    local targetY = waterPos.Y + waterSize.Y/2 + 3
-                    if charPos.Y < targetY then
-                        RootPart.CFrame = CFrame.new(charPos.X, targetY, charPos.Z)
-                    end
-                    break
-                end
-            end
-        end
-    end)
-end
-
-function DisableWaterWalk()
-    if Connections.WaterWalk then
-        Connections.WaterWalk:Disconnect()
-        Connections.WaterWalk = nil
-    end
-    WaterParts = {}
-end
 
 -- 📍 Teleport to Player
 function TeleportToPlayer(player)
@@ -85,29 +40,6 @@ function TeleportToPlayer(player)
         return true
     end
     return false
-end
-
--- 🔄 Server Hop
-function ServerHop()
-    local placeId = game.PlaceId
-    local servers = {}
-    
-    local success, result = pcall(function()
-        return HttpService:JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/"..placeId.."/servers/Public?limit=100"))
-    end)
-    
-    if success and result and result.data then
-        for _, server in pairs(result.data) do
-            if server.playing < server.maxPlayers and server.id ~= game.JobId then
-                table.insert(servers, server.id)
-            end
-        end
-        
-        if #servers > 0 then
-            local randomServer = servers[math.random(1, #servers)]
-            TeleportService:TeleportToPlaceInstance(placeId, randomServer)
-        end
-    end
 end
 
 -- ∞ Infinity Jump
@@ -200,26 +132,26 @@ function EnableGodMode()
     end
 end
 
--- 🎨 PREMIUM TABBED UI
+-- 🎨 CLEAN TABBED UI
 local MainWindow, TitleBar, ContentFrame, TabButtons = {}
 local IsUIVisible = true
 local CurrentTab = "Player"
 
-function CreateTabbedUI()
+function CreateCleanUI()
     -- Cleanup existing UI
-    if CoreGui:FindFirstChild("XresTabbedUI") then
-        CoreGui:FindFirstChild("XresTabbedUI"):Destroy()
+    if CoreGui:FindFirstChild("XresCleanUI") then
+        CoreGui:FindFirstChild("XresCleanUI"):Destroy()
     end
 
     -- Main ScreenGui
     local ScreenGui = Instance.new("ScreenGui")
-    ScreenGui.Name = "XresTabbedUI"
+    ScreenGui.Name = "XresCleanUI"
     ScreenGui.Parent = CoreGui
     ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
     -- Main Window Container
     MainWindow = Instance.new("Frame")
-    MainWindow.Size = UDim2.new(0, 400, 0, 450)
+    MainWindow.Size = UDim2.new(0, 380, 0, 420)
     MainWindow.Position = UDim2.new(0, 20, 0, 20)
     MainWindow.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
     MainWindow.BorderSizePixel = 0
@@ -269,7 +201,7 @@ function CreateTabbedUI()
     Title.TextXAlignment = Enum.TextXAlignment.Left
     Title.Parent = TitleBar
 
-    -- Window Control Buttons (Hanya Show/Hide saat minimized)
+    -- Window Control Buttons
     local ShowHideButton = CreateControlButton("−", Color3.fromRGB(255, 180, 60), UDim2.new(1, -15, 0.5, -10), TitleBar)
     local CloseButton = CreateControlButton("×", Color3.fromRGB(255, 80, 80), UDim2.new(1, -45, 0.5, -10), TitleBar)
 
@@ -285,7 +217,6 @@ function CreateTabbedUI()
         {Name = "Player", Icon = "👤"},
         {Name = "Movement", Icon = "🚀"}, 
         {Name = "Visual", Icon = "👁️"},
-        {Name = "Utility", Icon = "⚡"},
         {Name = "Teleport", Icon = "📍"}
     }
 
@@ -322,11 +253,10 @@ function CreateTabbedUI()
     CreatePlayerTab()
     CreateMovementTab()
     CreateVisualTab()
-    CreateUtilityTab()
     CreateTeleportTab()
 
     -- Hide other tabs initially
-    for _, tabName in pairs({"Movement", "Visual", "Utility", "Teleport"}) do
+    for _, tabName in pairs({"Movement", "Visual", "Teleport"}) do
         ContentFrame:FindFirstChild(tabName .. "Content").Visible = false
     end
 
@@ -385,14 +315,14 @@ function CreateTabbedUI()
             -- Show UI
             ContentFrame.Visible = true
             TabContainer.Visible = true
-            MainWindow.Size = UDim2.new(0, 400, 0, 450)
+            MainWindow.Size = UDim2.new(0, 380, 0, 420)
             ShowHideButton.Text = "−"
             CloseButton.Visible = true
         else
             -- Hide UI (hanya title bar)
             ContentFrame.Visible = false
             TabContainer.Visible = false
-            MainWindow.Size = UDim2.new(0, 400, 0, 40)
+            MainWindow.Size = UDim2.new(0, 380, 0, 40)
             ShowHideButton.Text = "+"
             CloseButton.Visible = false
         end
@@ -483,11 +413,6 @@ function CreateMovementTab()
         if state then EnableNoClip() else DisableNoClip() end
     end)
 
-    CreateFeatureToggle("🌊 WATER WALK", "Walk on water surfaces", Xres.Settings.WaterWalk, content, function(state)
-        Xres.Settings.WaterWalk = state
-        if state then EnableWaterWalk() else DisableWaterWalk() end
-    end)
-
     list:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
         content.CanvasSize = UDim2.new(0, 0, 0, list.AbsoluteContentSize.Y)
     end)
@@ -511,58 +436,6 @@ function CreateVisualTab()
     CreateFeatureToggle("👁️ PLAYER ESP", "See players through walls", Xres.Settings.ESP, content, function(state)
         Xres.Settings.ESP = state
         if state then EnableESP() else DisableESP() end
-    end)
-
-    list:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-        content.CanvasSize = UDim2.new(0, 0, 0, list.AbsoluteContentSize.Y)
-    end)
-end
-
--- ⚡ UTILITY TAB
-function CreateUtilityTab()
-    local content = Instance.new("ScrollingFrame")
-    content.Name = "UtilityContent"
-    content.Size = UDim2.new(1, 0, 1, 0)
-    content.BackgroundTransparency = 1
-    content.ScrollBarThickness = 4
-    content.ScrollBarImageColor3 = Color3.fromRGB(100, 70, 200)
-    content.Parent = ContentFrame
-
-    local list = Instance.new("UIListLayout")
-    list.Padding = UDim.new(0, 12)
-    list.Parent = content
-
-    -- Auto Server Hop
-    CreateFeatureToggle("🔄 AUTO SERVER HOP", "Auto join new servers", Xres.Settings.AutoServerHop, content, function(state)
-        Xres.Settings.AutoServerHop = state
-        if state then
-            Connections.AutoHop = RunService.Heartbeat:Connect(function()
-                if Xres.Settings.AutoServerHop then
-                    wait(30)
-                    if Xres.Settings.AutoServerHop then ServerHop() end
-                end
-            end)
-        else
-            if Connections.AutoHop then Connections.AutoHop:Disconnect() end
-        end
-    end)
-
-    -- Manual Server Hop Button
-    local ManualButton = Instance.new("TextButton")
-    ManualButton.Size = UDim2.new(1, 0, 0, 45)
-    ManualButton.BackgroundColor3 = Color3.fromRGB(160, 100, 255)
-    ManualButton.Text = "🔄 MANUAL SERVER HOP"
-    ManualButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    ManualButton.TextSize = 14
-    ManualButton.Font = Enum.Font.GothamBold
-    ManualButton.Parent = content
-
-    local ManualCorner = Instance.new("UICorner")
-    ManualCorner.CornerRadius = UDim.new(0, 8)
-    ManualCorner.Parent = ManualButton
-
-    ManualButton.MouseButton1Click:Connect(function()
-        ServerHop()
     end)
 
     list:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
@@ -870,23 +743,22 @@ LocalPlayer.CharacterAdded:Connect(function(newChar)
     if Xres.Settings.NoClip then EnableNoClip() end
     if Xres.Settings.InfinityJump then EnableInfinityJump() end
     if Xres.Settings.AntiAFK then EnableAntiAFK() end
-    if Xres.Settings.WaterWalk then EnableWaterWalk() end
     if Xres.Settings.GodMode then EnableGodMode() end
-end)
+end
 
 -- Auto God Mode
 game:GetService("ReplicatedStorage").DescendantAdded:Connect(function(obj)
     if Xres.Settings.GodMode and obj.Name == "VitalityBridge" then
         obj:Destroy()
     end
-end)
+end
 
 -- Initialize
 wait(1)
-CreateTabbedUI()
+CreateCleanUI()
 Humanoid.WalkSpeed = Xres.Settings.WalkSpeed
 
-print("✅ Xres 1.0.0 Tabbed UI Fully Loaded!")
-print("🎮 Tabs: Player, Movement, Visual, Utility, Teleport")
+print("✅ Xres 1.0.0 Clean Version Loaded!")
+print("🎮 Tabs: Player, Movement, Visual, Teleport")
 
 return Xres
