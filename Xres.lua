@@ -1,0 +1,1715 @@
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+   Name = "Xres | Version 1.0.0",
+   LoadingTitle = "Xres.",
+   LoadingSubtitle = "Version 1.0.0",
+   ConfigurationSaving = {
+      Enabled = true,
+      FolderName = "XresConfig",
+      FileName = "Settings"
+   },
+   Discord = {
+      Enabled = false,
+      Invite = "noinvite",
+      RememberJoins = true
+   },
+   KeySystem = false,
+})
+
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
+local VirtualUser = game:GetService("VirtualUser")
+local TeleportService = game:GetService("TeleportService")
+local Workspace = game:GetService("Workspace")
+
+-- Player
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local Humanoid = Character:WaitForChild("Humanoid")
+local RootPart = Character:WaitForChild("HumanoidRootPart")
+
+-- Config
+local Xres = {
+    WalkSpeed = 16,
+    ESP = false,
+    NameESP = false,
+    NoClip = false,
+    GodMode = false,
+    InfinityJump = false,
+    AntiAFK = false,
+    FPSBoost = false,    
+}
+
+-- Variables
+local DefaultWalkSpeed = 16
+local NoFogEnabled = false
+local OriginalFogEnd
+local NoShadowEnabled = false
+local ServerInfoEnabled = false
+local HitboxExpanderEnabled = false
+local noSkillEnabled = false
+local noSkillToggleUser = false
+local hookSkillInstalled = false
+local HitboxMultiplier = 1.5
+local Connections = {}
+local OriginalLightingSettings = {}
+local OriginalShadowSettings = {}
+local rsAddConn, pgAddConn, pgDescConn, sgAddConn, remAddConn, wsAddConn
+local charAddConns = {}
+-- ESP Variables
+local survivorColor = Color3.fromRGB(0, 255, 0)
+local killerBaseColor = Color3.fromRGB(255, 0, 0)
+local nametagsEnabled, playerESPEnabled = false, false
+local playerConns = {}
+local espLoopConn = nil
+
+-- Variables untuk Killer Ability Notify
+local abilityNotifyEnabled = true
+local remoteHooks = setmetatable({}, {__mode = "k"})
+local knownKillers = {}
+local killerTypeName = "Unknown"
+local speedStunUntil = 0
+local speedSlowUntil = 0
+local palletState = {}
+local windowState = {}
+
+local abilityAllow = {
+    ["Killer.ActivatePower"]      = "Ability Activated",
+    ["Jason.Instinct"]            = "Instinct", 
+    ["Masked.Activatepower"]      = "Dash",
+    ["Hidden.M2"]                 = "M2",
+    ["Stalker.StartStalking"]     = "Stalk",
+    ["Abysswalker.corrupt"]       = "Corrupt",
+    ["TheEvil.Tusk"]              = "Tusk",
+}
+
+-- World ESP Variables
+local worldColors = {
+    Generator = Color3.fromRGB(0, 170, 255),
+    Hook = Color3.fromRGB(255, 0, 0),
+    Gate = Color3.fromRGB(255, 225, 0),
+    Window = Color3.fromRGB(255, 255, 255),
+    Pallet = Color3.fromRGB(255, 140, 0),
+    Pumpkin = Color3.fromRGB(255, 165, 0)
+}
+local worldEnabled = {
+    Generator = false,
+    Hook = false, 
+    Gate = false,
+    Window = false,
+    Pallet = false,
+    Pumpkin = false
+}
+local worldReg = {
+    Generator = {},
+    Hook = {},
+    Gate = {},
+    Window = {},
+    Pallet = {},
+    Pumpkin = {}
+}
+local worldLoopThread = nil
+
+-- Variables untuk HUD
+local ServerInfoGUI
+
+-- Helper Functions
+local function now()
+    return tick()
+end
+
+local function dist(pos1, pos2)
+    return (pos1 - pos2).Magnitude
+end
+
+local function setKillerType(kn)
+    killerTypeName = kn
+    knownKillers[kn] = true
+end
+
+local function bindHumanoid(h)
+    -- Placeholder untuk humanoid binding jika diperlukan
+end
+
+local function isExactSkill(obj)
+    if not obj then return false end
+    local name = obj.Name:lower()
+    return name:find("skill") or name:find("qte") or name:find("quicktime") 
+           or name:find("repair") or name:find("heal") or name:find("interact")
+end
+
+local function hardDelete(obj)
+    if obj and obj.Parent then
+        pcall(function() obj:Destroy() end)
+    end
+end
+
+local function nukeSkillExactOnce()
+    -- Cari dan hapus skill checks yang ada
+    for _, obj in pairs(Workspace:GetDescendants()) do
+        if isExactSkill(obj) then
+            hardDelete(obj)
+        end
+    end
+    
+    local pg = LocalPlayer:FindFirstChild("PlayerGui")
+    if pg then
+        for _, obj in pairs(pg:GetDescendants()) do
+            if isExactSkill(obj) then
+                hardDelete(obj)
+            end
+        end
+    end
+    
+    for _, obj in pairs(ReplicatedStorage:GetDescendants()) do
+        if isExactSkill(obj) then
+            hardDelete(obj)
+        end
+    end
+end
+
+local function isKillerTeam()
+    local team = LocalPlayer.Team
+    if team then
+        local teamName = team.Name:lower()
+        return teamName:find("killer") or teamName:find("hunter") or teamName:find("murderer")
+    end
+    return false
+end
+
+local function alive(obj)
+    if not obj then return false end
+    local success = pcall(function() return obj.Parent ~= nil end)
+    return success
+end
+
+local function validPart(p) 
+    return p and alive(p) and p:IsA("BasePart") 
+end
+
+local function clamp(n, lo, hi) 
+    if n < lo then return lo elseif n > hi then return hi else return n end 
+end
+
+local function firstBasePart(inst)
+    if not alive(inst) then return nil end
+    if inst:IsA("BasePart") then return inst end
+    if inst:IsA("Model") then
+        if inst.PrimaryPart and inst.PrimaryPart:IsA("BasePart") and alive(inst.PrimaryPart) then 
+            return inst.PrimaryPart 
+        end
+        local p = inst:FindFirstChildWhichIsA("BasePart", true)
+        if validPart(p) then return p end
+    end
+    return nil
+end
+
+local function makeBillboard(text, color3)
+    local g = Instance.new("BillboardGui")
+    g.Name = "Xres_Tag"
+    g.AlwaysOnTop = true
+    g.Size = UDim2.new(0, 200, 0, 36)
+    g.StudsOffset = Vector3.new(0, 3, 0)
+    
+    local l = Instance.new("TextLabel")
+    l.Name = "Label"
+    l.BackgroundTransparency = 1
+    l.Size = UDim2.new(1, 0, 1, 0)
+    l.Font = Enum.Font.GothamBold
+    l.Text = text
+    l.TextSize = 14
+    l.TextColor3 = color3 or Color3.new(1,1,1)
+    l.TextStrokeTransparency = 0
+    l.TextStrokeColor3 = Color3.new(0,0,0)
+    l.Parent = g
+    return g
+end
+
+local function clearChild(o, n)
+    if o and alive(o) then
+        local c = o:FindFirstChild(n)
+        if c then pcall(function() c:Destroy() end) end
+    end
+end
+
+local function ensureHighlight(model, fill)
+    if not (model and model:IsA("Model") and alive(model)) then return end
+    local hl = model:FindFirstChild("Xres_HL")
+    if not hl then
+        local ok, obj = pcall(function()
+            local h = Instance.new("Highlight")
+            h.Name = "Xres_HL"
+            h.Adornee = model
+            h.FillTransparency = 0.5
+            h.OutlineTransparency = 0
+            h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+            h.Parent = model
+            return h
+        end)
+        if ok then hl = obj else return end
+    end
+    hl.FillColor = fill
+    hl.OutlineColor = fill
+    return hl
+end
+
+local function clearHighlight(model)
+    if model and model:FindFirstChild("Xres_HL") then
+        pcall(function() model.Xres_HL:Destroy() end)
+    end
+end
+
+-- Player ESP Functions
+local function getRole(p)
+    local tn = p.Team and p.Team.Name and p.Team.Name:lower() or ""
+    if tn:find("killer") then return "Killer" end
+    if tn:find("survivor") then return "Survivor" end
+    return "Survivor"
+end
+
+local function applyOnePlayerESP(p)
+    if p == LocalPlayer then return end
+    local c = p.Character
+    if not (c and alive(c)) then return end
+    
+    local col = (getRole(p) == "Killer") and killerBaseColor or survivorColor
+    
+    if playerESPEnabled then
+        ensureHighlight(c, col)
+        local head = c:FindFirstChild("Head")
+        if nametagsEnabled and validPart(head) then
+            local tag = head:FindFirstChild("Xres_Tag") or makeBillboard(p.Name, col)
+            tag.Name = "Xres_Tag"
+            tag.Parent = head
+            local l = tag:FindFirstChild("Label")
+            if l then
+                l.Text = p.Name
+                l.TextColor3 = col
+            end
+        else
+            local t = head and head:FindFirstChild("Xres_Tag")
+            if t then pcall(function() t:Destroy() end) end
+        end
+    else
+        clearHighlight(c)
+        local head = c:FindFirstChild("Head")
+        local t = head and head:FindFirstChild("Xres_Tag")
+        if t then pcall(function() t:Destroy() end) end
+    end
+end
+
+local function startESPLoop()
+    if espLoopConn then return end
+    espLoopConn = RunService.Heartbeat:Connect(function()
+        if not playerESPEnabled and not nametagsEnabled then return end
+        for _, pl in ipairs(Players:GetPlayers()) do
+            if pl ~= LocalPlayer then 
+                applyOnePlayerESP(pl) 
+            end
+        end
+    end)
+end
+
+local function stopESPLoop()
+    if espLoopConn then 
+        espLoopConn:Disconnect() 
+        espLoopConn = nil 
+    end
+end
+
+local function watchPlayer(p)
+    if playerConns[p] then 
+        for _, cn in ipairs(playerConns[p]) do 
+            cn:Disconnect() 
+        end 
+    end
+    playerConns[p] = {}
+    
+    table.insert(playerConns[p], p.CharacterAdded:Connect(function()
+        task.delay(0.15, function() applyOnePlayerESP(p) end)
+    end))
+    
+    table.insert(playerConns[p], p:GetPropertyChangedSignal("Team"):Connect(function() 
+        applyOnePlayerESP(p) 
+    end))
+    
+    if p.Character then 
+        applyOnePlayerESP(p) 
+    end
+end
+
+local function unwatchPlayer(p)
+    if p.Character then
+        clearHighlight(p.Character)
+        local head = p.Character:FindFirstChild("Head")
+        if head and head:FindFirstChild("Xres_Tag") then 
+            pcall(function() head.Xres_Tag:Destroy() end) 
+        end
+    end
+    if playerConns[p] then 
+        for _, cn in ipairs(playerConns[p]) do 
+            cn:Disconnect() 
+        end 
+    end
+    playerConns[p] = nil
+end
+
+-- World ESP Functions
+local function pickRep(model, cat)
+    if not (model and alive(model)) then return nil end
+    if cat == "Generator" then
+        local hb = model:FindFirstChild("HitBox", true)
+        if validPart(hb) then return hb end
+    elseif cat == "Pallet" then
+        local a = model:FindFirstChild("HumanoidRootPart", true) 
+        if validPart(a) then return a end
+        local b = model:FindFirstChild("PrimaryPartPallet", true)
+        if validPart(b) then return b end
+    end
+    return firstBasePart(model)
+end
+
+local function genLabelData(model)
+    local pct = tonumber(model:GetAttribute("RepairProgress")) or 0
+    if pct >= 0 and pct <= 1.001 then pct = pct * 100 end
+    pct = clamp(pct, 0, 100)
+    
+    local parts = {"Generator "..tostring(math.floor(pct + 0.5)).."%"}
+    local text = table.concat(parts, " ")
+    local hue = clamp((pct/100) * 0.33, 0, 0.33)
+    local labelColor = Color3.fromHSV(hue, 1, 1)
+    
+    return text, labelColor
+end
+
+local function ensureWorldEntry(cat, model)
+    if not alive(model) or worldReg[cat][model] then return end
+    local rep = pickRep(model, cat)
+    if not validPart(rep) then return end
+    worldReg[cat][model] = {part = rep}
+end
+
+local function removeWorldEntry(cat, model)
+    local e = worldReg[cat][model]
+    if not e then return end
+    clearChild(e.part, "Xres_"..cat)
+    clearChild(e.part, "Xres_Text_"..cat)
+    worldReg[cat][model] = nil
+end
+
+local function registerFromDescendant(obj)
+    if not alive(obj) then return end
+    
+    if obj:IsA("Model") then
+        local name = obj.Name:lower()
+        if name:find("generator") then
+            ensureWorldEntry("Generator", obj)
+        elseif name:find("hook") then
+            ensureWorldEntry("Hook", obj)
+        elseif name:find("gate") or name:find("exit") then
+            ensureWorldEntry("Gate", obj)
+        elseif name:find("window") then
+            ensureWorldEntry("Window", obj)
+        elseif name:find("pallet") then
+            ensureWorldEntry("Pallet", obj)
+        elseif name:find("pumpkin") then
+            ensureWorldEntry("Pumpkin", obj)
+        end
+    end
+end
+
+local function scanWorkspaceForObjects()
+    for _, obj in pairs(Workspace:GetDescendants()) do
+        registerFromDescendant(obj)
+    end
+end
+
+local function anyWorldEnabled()
+    for _, v in pairs(worldEnabled) do
+        if v then return true end
+    end
+    return false
+end
+
+local function startWorldLoop()
+    if worldLoopThread then return end
+    
+    worldLoopThread = task.spawn(function()
+        while anyWorldEnabled() do
+            for cat, models in pairs(worldReg) do
+                if worldEnabled[cat] then
+                    local col = worldColors[cat]
+                    local tagName = "Xres_"..cat
+                    local textName = "Xres_Text_"..cat
+                    
+                    for model, entry in pairs(models) do
+                        if model and alive(model) then
+                            local part = entry.part
+                            if not validPart(part) or (model:IsA("Model") and not part:IsDescendantOf(model)) then
+                                entry.part = pickRep(model, cat)
+                                part = entry.part
+                            end
+                            
+                            if validPart(part) then
+                                -- Create/Update BoxHandleAdornment
+                                local a = part:FindFirstChild(tagName)
+                                if not a then
+                                    local b = Instance.new("BoxHandleAdornment")
+                                    b.Name = tagName
+                                    b.Adornee = part
+                                    b.ZIndex = 10
+                                    b.AlwaysOnTop = true
+                                    b.Transparency = 0.5
+                                    b.Size = part.Size + Vector3.new(0.2, 0.2, 0.2)
+                                    b.Color3 = col
+                                    b.Parent = part
+                                else
+                                    a.Color3 = col
+                                    a.Size = part.Size + Vector3.new(0.2, 0.2, 0.2)
+                                end
+                                
+                                -- Create/Update Billboard
+                                local bb = part:FindFirstChild(textName)
+                                if not bb then
+                                    local newbb = makeBillboard(cat, col)
+                                    newbb.Name = textName
+                                    newbb.Parent = part
+                                    bb = newbb
+                                end
+                                
+                                local lbl = bb:FindFirstChild("Label")
+                                if lbl then
+                                    if cat == "Generator" then
+                                        local txt, lblCol = genLabelData(model)
+                                        lbl.Text = txt
+                                        lbl.TextColor3 = lblCol
+                                    else
+                                        lbl.Text = cat
+                                        lbl.TextColor3 = col
+                                    end
+                                end
+                            end
+                        else
+                            removeWorldEntry(cat, model)
+                        end
+                    end
+                end
+            end
+            task.wait(0.25)
+        end
+        worldLoopThread = nil
+    end)
+end
+
+local function setWorldToggle(cat, state)
+    worldEnabled[cat] = state
+    
+    if state then
+        if not worldLoopThread then 
+            startWorldLoop() 
+        end
+    else
+        for _, entry in pairs(worldReg[cat]) do
+            if entry and entry.part then
+                clearChild(entry.part, "Xres_"..cat)
+                clearChild(entry.part, "Xres_Text_"..cat)
+            end
+        end
+    end
+end
+
+-- Main Functions
+local function connectRemote(inst)
+    if remoteHooks[inst] then return end
+    local isRE, isBE = inst:IsA("RemoteEvent"), inst:IsA("BindableEvent")
+    if not (isRE or isBE) then return end
+    
+    local full = inst:GetFullName()
+    local underKillers    = full:find("ReplicatedStorage.Remotes.Killers", 1, true) ~= nil
+    local underMechanics  = full:find("ReplicatedStorage.Remotes.Mechanics", 1, true) ~= nil
+    local underPallet     = full:find("ReplicatedStorage.Remotes.Pallet", 1, true) ~= nil
+    local underWindow     = full:find("ReplicatedStorage.Remotes.Window", 1, true) ~= nil
+
+    local function hook(fn)
+        local conn
+        if isRE then 
+            conn = inst.OnClientEvent:Connect(fn) 
+        else 
+            conn = inst.Event:Connect(fn) 
+        end
+        remoteHooks[inst] = conn
+    end
+
+    -- Killer Ability Detection
+    if underKillers then
+        local seg = string.split(full, ".")
+        for i = #seg, 1, -1 do
+            if seg[i] == "Killers" then
+                local kn = seg[i + 1]
+                if kn and knownKillers[kn] then
+                    hook(function(...)
+                        setKillerType(kn)
+                        local key = kn .. "." .. inst.Name
+                        local label = abilityAllow[key]
+                        if label and abilityNotifyEnabled then
+                            Rayfield:Notify({
+                                Title = "Killer Ability", 
+                                Content = kn .. ": " .. label, 
+                                Duration = 4
+                            })
+                        end
+                    end)
+                else
+                    local key = (kn or "Killer") .. "." .. inst.Name
+                    if abilityAllow[key] then
+                        hook(function(...)
+                            if abilityNotifyEnabled then
+                                local who = knownKillers[kn or ""] and kn or killerTypeName
+                                Rayfield:Notify({
+                                    Title = "Killer Ability",
+                                    Content = tostring(who) .. ": " .. abilityAllow[key],
+                                    Duration = 4
+                                })
+                            end
+                        end)
+                    end
+                end
+                break
+            end
+        end
+    end
+
+    -- Mechanics Detection (Stun/Slow)
+    if underMechanics then
+        if inst.Name == "PalletStun" then 
+            hook(function()
+                speedStunUntil = math.max(speedStunUntil, now() + 3.5)
+                if getRole(LocalPlayer) == "Killer" and speedEnforced then
+                    speedEnforced = false
+                    disconnectAll()
+                    applyDisabledState()
+                    Rayfield:Notify({
+                        Title = "Speed", 
+                        Content = "Speed Lock disabled due to Killer pallet stun", 
+                        Duration = 4
+                    })
+                end
+            end)
+        elseif inst.Name == "Slow" then 
+            hook(function() 
+                speedSlowUntil = math.max(speedSlowUntil, now() + 3.0) 
+            end)
+        elseif inst.Name == "Slowserver" and isRE then
+            hook(function(_, _, dur)
+                local d = (typeof(dur) == "number") and math.clamp(dur, 1, 10) or 3.0
+                speedSlowUntil = math.max(speedSlowUntil, now() + d)
+            end)
+        end
+    end
+
+    -- Pallet Events
+    if underPallet then
+        if inst.Name == "PalletDropEvent" then 
+            hook(function()
+                local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if not hrp then return end
+                local best, bd = nil, 1e9
+                for m, e in pairs(worldReg.Pallet or {}) do 
+                    if e and e.part then 
+                        local d = dist(e.part.Position, hrp.Position) 
+                        if d < bd then 
+                            bd = d 
+                            best = m 
+                        end 
+                    end 
+                end
+                if best then 
+                    palletState[best] = "DOWN" 
+                end
+            end)
+        elseif inst.Name == "Destroy" or inst.Name == "Destroy-Global" then 
+            hook(function()
+                local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if not hrp then return end
+                local best, bd = nil, 1e9
+                for m, e in pairs(worldReg.Pallet or {}) do 
+                    if e and e.part then 
+                        local d = dist(e.part.Position, hrp.Position) 
+                        if d < bd then 
+                            bd = d 
+                            best = m 
+                        end 
+                    end 
+                end
+                if best then 
+                    palletState[best] = "DEST" 
+                end
+            end)
+        end
+    end
+
+    -- Window Events  
+    if underWindow then
+        if inst.Name == "VaultEvent" or inst.Name == "VaultAnim" or inst.Name == "fastvault" then 
+            hook(function()
+                local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if not hrp then return end
+                local best, bd = nil, 1e9
+                for m, e in pairs(worldReg.Window or {}) do 
+                    if e and e.part then 
+                        local d = dist(e.part.Position, hrp.Position) 
+                        if d < bd then 
+                            bd = d 
+                            best = m 
+                        end 
+                    end 
+                end
+                if best then 
+                    windowState[best] = "BUSY" 
+                    task.delay(1.2, function() 
+                        if windowState[best] == "BUSY" then 
+                            windowState[best] = "READY" 
+                        end 
+                    end) 
+                end
+            end)
+        end
+    end
+end
+
+local function installSkillBlock()
+    if hookSkillInstalled then return end
+    if typeof(hookmetamethod) == "function" and typeof(getnamecallmethod) == "function" then
+        local old
+        old = hookmetamethod(game, "__namecall", function(self, ...)
+            local m = getnamecallmethod()
+            if noSkillEnabled and typeof(self) == "Instance" and isExactSkill(self) and (m == "FireServer" or m == "InvokeServer") then
+                return nil
+            end
+            return old(self, ...)
+        end)
+        hookSkillInstalled = true
+    end
+end
+
+local function startNoSkill()
+    installSkillBlock()
+    nukeSkillExactOnce()
+    
+    local pg = LocalPlayer:FindFirstChild("PlayerGui")
+    if pg then
+        if pgAddConn then pgAddConn:Disconnect() end
+        pgAddConn = pg.ChildAdded:Connect(function(ch) 
+            if noSkillEnabled and isExactSkill(ch) then 
+                hardDelete(ch) 
+            end 
+        end)
+        
+        if pgDescConn then pgDescConn:Disconnect() end
+        pgDescConn = pg.DescendantAdded:Connect(function(d) 
+            if noSkillEnabled and isExactSkill(d) then 
+                hardDelete(d) 
+            end 
+        end)
+    end
+    
+    local sg = game:GetService("StarterGui")
+    if sgAddConn then sgAddConn:Disconnect() end
+    sgAddConn = sg.ChildAdded:Connect(function(ch) 
+        if noSkillEnabled and isExactSkill(ch) then 
+            hardDelete(ch) 
+        end 
+    end)
+    
+    local rem = ReplicatedStorage:FindFirstChild("Remotes")
+    if rem then
+        if remAddConn then remAddConn:Disconnect() end
+        remAddConn = rem.DescendantAdded:Connect(function(d) 
+            if noSkillEnabled and isExactSkill(d) then 
+                hardDelete(d) 
+            end 
+        end)
+    end
+    
+    if rsAddConn then rsAddConn:Disconnect() end
+    rsAddConn = ReplicatedStorage.DescendantAdded:Connect(function(d)
+        if not noSkillEnabled then return end
+        if d:IsA("ScreenGui") or d:IsA("BillboardGui") or d:IsA("SurfaceGui") or d:IsA("RemoteEvent") or d:IsA("RemoteFunction") or d:IsA("BindableEvent") then
+            if isExactSkill(d) then 
+                hardDelete(d) 
+            end
+        end
+    end)
+    
+    for _, pl in ipairs(Players:GetPlayers()) do
+        if charAddConns[pl] then 
+            charAddConns[pl]:Disconnect() 
+        end
+        charAddConns[pl] = pl.CharacterAdded:Connect(function(ch)
+            if not noSkillEnabled then return end
+            task.wait(0.1)
+            for _, d in ipairs(ch:GetDescendants()) do 
+                if isExactSkill(d) then 
+                    hardDelete(d) 
+                end 
+            end
+        end)
+        if pl.Character then 
+            for _, d in ipairs(pl.Character:GetDescendants()) do 
+                if isExactSkill(d) then 
+                    hardDelete(d) 
+                end 
+            end 
+        end
+    end
+    
+    if wsAddConn then wsAddConn:Disconnect() end
+    wsAddConn = Workspace.DescendantAdded:Connect(function(d) 
+        if noSkillEnabled and isExactSkill(d) then 
+            hardDelete(d) 
+        end 
+    end)
+end
+
+local function stopNoSkill()
+    if pgAddConn then pgAddConn:Disconnect() pgAddConn = nil end
+    if pgDescConn then pgDescConn:Disconnect() pgDescConn = nil end
+    if sgAddConn then sgAddConn:Disconnect() sgAddConn = nil end
+    if remAddConn then remAddConn:Disconnect() remAddConn = nil end
+    if rsAddConn then rsAddConn:Disconnect() rsAddConn = nil end
+    if wsAddConn then wsAddConn:Disconnect() wsAddConn = nil end
+    for pl, cn in pairs(charAddConns) do 
+        if cn then cn:Disconnect() end 
+        charAddConns[pl] = nil 
+    end
+end
+
+local function evalNoSkill()
+    if noSkillToggleUser and not isKillerTeam() then
+        if not noSkillEnabled then 
+            noSkillEnabled = true 
+            startNoSkill() 
+            Rayfield:Notify({
+                Title = "No Skillchecks",
+                Content = "Skillchecks disabled!",
+                Duration = 3
+            })
+        end
+    else
+        if noSkillEnabled then 
+            noSkillEnabled = false 
+            stopNoSkill()
+            Rayfield:Notify({
+                Title = "No Skillchecks",
+                Content = "Skillchecks enabled!",
+                Duration = 3
+            })
+        end
+    end
+end
+
+function EnableNoFog()
+    OriginalFogEnd = Lighting.FogEnd
+    Lighting.FogEnd = 100000
+end
+
+function DisableNoFog()
+    if OriginalFogEnd then
+        Lighting.FogEnd = OriginalFogEnd
+    end
+end
+
+-- Versi lebih optimal untuk FPS
+local NoShadowEnabled = false
+
+function EnableNoShadow()
+    -- Lighting settings
+    Lighting.GlobalShadows = false
+    Lighting.ShadowSoftness = 0
+    
+    -- Disable shadows untuk character parts saja (lebih ringan)
+    if Character then
+        for _, part in pairs(Character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CastShadow = false
+            end
+        end
+    end
+    
+    -- Untuk player lain
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            for _, part in pairs(player.Character:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.CastShadow = false
+                end
+            end
+        end
+    end
+end
+
+function DisableNoShadow()
+    Lighting.GlobalShadows = true
+    Lighting.ShadowSoftness = 0.5
+    
+    -- Enable shadows kembali
+    if Character then
+        for _, part in pairs(Character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CastShadow = true
+            end
+        end
+    end
+end
+
+
+function ResetWalkSpeed()
+    Xres.WalkSpeed = DefaultWalkSpeed
+    if Humanoid then
+        Humanoid.WalkSpeed = DefaultWalkSpeed
+    end
+    
+    -- Update slider value juga
+    if Rayfield and Rayfield.Flags then
+        Rayfield.Flags.WalkSpeed:Set(DefaultWalkSpeed)
+    end
+    
+    Rayfield:Notify({
+        Title = "Walk Speed",
+        Content = "Speed reset to " .. DefaultWalkSpeed,
+        Duration = 3
+    })
+end
+
+-- Server Info HUD
+function CreateServerInfoHUD()
+    if ServerInfoGUI then ServerInfoGUI:Destroy() end
+    
+    ServerInfoGUI = Instance.new("ScreenGui")
+    ServerInfoGUI.Name = "ServerInfoHUD"
+    ServerInfoGUI.Parent = CoreGui
+    ServerInfoGUI.ResetOnSpawn = false
+    
+    local Frame = Instance.new("Frame")
+    Frame.Size = UDim2.new(0, 220, 0, 100)
+    Frame.Position = UDim2.new(1, -230, 0, 10)
+    Frame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+    Frame.BackgroundTransparency = 0.3
+    Frame.BorderSizePixel = 0
+    Frame.Parent = ServerInfoGUI
+    
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 8)
+    Corner.Parent = Frame
+    
+    local Stroke = Instance.new("UIStroke")
+    Stroke.Color = Color3.fromRGB(255, 120, 60)
+    Stroke.Thickness = 2
+    Stroke.Parent = Frame
+    
+    local Labels = {}
+    local serverTexts = {
+        "Players: 0/0", "Server Age: 0m", 
+        "Job ID: ...", "Place: ..."
+    }
+    
+    for i, text in ipairs(serverTexts) do
+        local Label = Instance.new("TextLabel")
+        Label.Size = UDim2.new(1, -10, 0, 20)
+        Label.Position = UDim2.new(0, 5, 0, 5 + (i-1)*23)
+        Label.BackgroundTransparency = 1
+        Label.Text = text
+        Label.TextColor3 = Color3.fromRGB(255, 255, 255)
+        Label.TextSize = 12
+        Label.Font = Enum.Font.Gotham
+        Label.TextXAlignment = Enum.TextXAlignment.Left
+        Label.Parent = Frame
+        Labels[i] = Label
+    end
+    
+    Connections.ServerInfo = RunService.Heartbeat:Connect(function()
+        if not ServerInfoEnabled or not ServerInfoGUI then return end
+        
+        -- Player Count
+        local playerCount = #Players:GetPlayers()
+        local maxPlayers = Players.MaxPlayers
+        Labels[1].Text = "Players: " .. playerCount .. "/" .. maxPlayers
+        
+        -- Server Age (estimated)
+        Labels[2].Text = "Server Age: " .. math.random(5, 60) .. "m"
+        
+        -- Job ID
+        Labels[3].Text = "Job ID: " .. game.JobId
+        
+        -- Place Name
+        Labels[4].Text = "Place: " .. game.PlaceId
+    end)
+end
+
+-- Server Hop
+function ServerHop()
+    local servers = {}
+    local placeId = game.PlaceId
+    
+    local success, result = pcall(function()
+        return HttpService:JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/" .. placeId .. "/servers/Public?limit=100"))
+    end)
+    
+    if success and result.data then
+        for _, server in pairs(result.data) do
+            if server.playing < server.maxPlayers and server.id ~= game.JobId then
+                table.insert(servers, server.id)
+            end
+        end
+        
+        if #servers > 0 then
+            local randomServer = servers[math.random(1, #servers)]
+            TeleportService:TeleportToPlaceInstance(placeId, randomServer)
+        else
+            Rayfield:Notify({
+                Title = "Server Hop",
+                Content = "No available servers found!",
+                Duration = 3
+            })
+        end
+    else
+        Rayfield:Notify({
+            Title = "Server Hop",
+            Content = "Failed to fetch servers!",
+            Duration = 3
+        })
+    end
+end
+
+-- Hitbox Expander
+function EnableHitboxExpander()
+    if Connections.HitboxExpander then
+        Connections.HitboxExpander:Disconnect()
+    end
+    
+    Connections.HitboxExpander = RunService.Heartbeat:Connect(function()
+        if not HitboxExpanderEnabled then return end
+        
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                for _, part in pairs(player.Character:GetChildren()) do
+                    if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                        part.Size = part.Size * HitboxMultiplier
+                        part.Transparency = 0.5
+                        part.CanCollide = false
+                    end
+                end
+            end
+        end
+    end)
+end
+
+function DisableHitboxExpander()
+    if Connections.HitboxExpander then
+        Connections.HitboxExpander:Disconnect()
+        Connections.HitboxExpander = nil
+    end
+    
+    -- Reset hitboxes
+    for _, player in pairs(Players:GetPlayers()) do
+        if player.Character then
+            for _, part in pairs(player.Character:GetChildren()) do
+                if part:IsA("BasePart") then
+                    part.Size = Vector3.new(1, 1, 1)
+                    part.Transparency = 0
+                    part.CanCollide = true
+                end
+            end
+        end
+    end
+end
+
+function EnableFPSBoost()
+    OriginalLightingSettings = {
+        GlobalShadows = Lighting.GlobalShadows,
+        FogEnd = Lighting.FogEnd
+    }
+    
+    Lighting.GlobalShadows = false
+    Lighting.FogEnd = 100000
+    
+    if settings().Rendering then
+        OriginalLightingSettings.QualityLevel = settings().Rendering.QualityLevel
+        settings().Rendering.QualityLevel = 1
+    end
+    
+    for _, effect in pairs(Lighting:GetChildren()) do
+        if effect:IsA("BloomEffect") or effect:IsA("BlurEffect") or effect:IsA("ColorCorrectionEffect") then
+            effect.Enabled = false
+        end
+    end
+end
+
+function DisableFPSBoost()
+    if OriginalLightingSettings.GlobalShadows ~= nil then
+        Lighting.GlobalShadows = OriginalLightingSettings.GlobalShadows
+    end
+    if OriginalLightingSettings.QualityLevel ~= nil and settings().Rendering then
+        settings().Rendering.QualityLevel = OriginalLightingSettings.QualityLevel
+    end
+    if OriginalLightingSettings.FogEnd ~= nil then
+        Lighting.FogEnd = OriginalLightingSettings.FogEnd
+    end
+    
+    for _, effect in pairs(Lighting:GetChildren()) do
+        if effect:IsA("BloomEffect") or effect:IsA("BlurEffect") or effect:IsA("ColorCorrectionEffect") then
+            effect.Enabled = true
+        end
+    end
+end
+
+function EnableNoClip()
+    if Connections.NoClip then Connections.NoClip:Disconnect() end
+    Connections.NoClip = RunService.Stepped:Connect(function()
+        if Xres.NoClip and Character then
+            for _, part in pairs(Character:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = false
+                end
+            end
+        end
+    end)
+end
+
+function DisableNoClip()
+    if Connections.NoClip then 
+        Connections.NoClip:Disconnect() 
+        Connections.NoClip = nil
+    end
+end
+
+function EnableInfinityJump()
+    if Connections.InfinityJump then Connections.InfinityJump:Disconnect() end
+    Connections.InfinityJump = UserInputService.JumpRequest:Connect(function()
+        if Xres.InfinityJump and Character and Humanoid then
+            Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+    end)
+end
+
+function DisableInfinityJump()
+    if Connections.InfinityJump then 
+        Connections.InfinityJump:Disconnect() 
+        Connections.InfinityJump = nil
+    end
+end
+
+function EnableAntiAFK()
+    if Connections.AntiAFK then Connections.AntiAFK:Disconnect() end
+    Connections.AntiAFK = LocalPlayer.Idled:Connect(function()
+        VirtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+        wait(1)
+        VirtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+    end)
+end
+
+function DisableAntiAFK()
+    if Connections.AntiAFK then 
+        Connections.AntiAFK:Disconnect() 
+        Connections.AntiAFK = nil
+    end
+end
+
+function EnableGodMode()
+    for _, obj in pairs(ReplicatedStorage:GetDescendants()) do
+        if obj.Name == "VitalityBridge" then
+            obj:Destroy()
+        end
+    end
+end
+
+function TeleportToPlayer(player)
+    if player and player.Character and player.Character:FindFirstChild("HumanoidRootPart") and RootPart then
+        RootPart.CFrame = player.Character.HumanoidRootPart.CFrame + Vector3.new(0, 3, 0)
+        return true
+    end
+    return false
+end
+
+-- Create Tabs
+local PlayerTab = Window:CreateTab("Player")
+local UtilityTab = Window:CreateTab("Utility")
+local VisualTab = Window:CreateTab("Visual")
+local ESPTab = Window:CreateTab("ESP")
+local WorldTab = Window:CreateTab("World")
+local MiscTab = Window:CreateTab("Misc")
+
+-- Player Tab
+PlayerTab:CreateSlider({
+    Name = "Walk Speed",
+    Range = {16, 200},
+    Increment = 1,
+    Suffix = "Speed",
+    CurrentValue = 16,
+    Flag = "WalkSpeed",
+    Callback = function(Value)
+        Xres.WalkSpeed = Value
+        if Humanoid then
+            Humanoid.WalkSpeed = Value
+        end
+    end,
+})
+
+PlayerTab:CreateButton({
+    Name = "Reset Speed",
+    Callback = function()
+        ResetWalkSpeed()
+    end,
+})
+
+PlayerTab:CreateToggle({
+    Name = "No Clip",
+    CurrentValue = false,
+    Flag = "NoClip",
+    Callback = function(Value)
+        Xres.NoClip = Value
+        if Value then
+            EnableNoClip()
+        else
+            DisableNoClip()
+        end
+    end,
+})
+
+PlayerTab:CreateToggle({
+    Name = "God Mode",
+    CurrentValue = false,
+    Flag = "GodMode",
+    Callback = function(Value)
+        Xres.GodMode = Value
+        if Value then
+            EnableGodMode()
+        end
+    end,
+})
+
+PlayerTab:CreateToggle({
+    Name = "Infinity Jump",
+    CurrentValue = false,
+    Flag = "InfinityJump",
+    Callback = function(Value)
+        Xres.InfinityJump = Value
+        if Value then
+            EnableInfinityJump()
+        else
+            DisableInfinityJump()
+        end
+    end,
+})
+
+PlayerTab:CreateSection("AFK")
+
+PlayerTab:CreateToggle({
+    Name = "Anti AFK",
+    CurrentValue = false,
+    Flag = "AntiAFK",
+    Callback = function(Value)
+        Xres.AntiAFK = Value
+        if Value then
+            EnableAntiAFK()
+        else
+            DisableAntiAFK()
+        end
+    end,
+})
+
+-- Utility Tab
+UtilityTab:CreateToggle({
+    Name = "Hitbox Expander",
+    CurrentValue = false,
+    Flag = "HitboxExpanderToggle",
+    Callback = function(Value)
+        HitboxExpanderEnabled = Value
+        if Value then
+            EnableHitboxExpander()
+            Rayfield:Notify({
+                Title = "Hitbox Expander",
+                Content = "Hitboxes expanded!",
+                Duration = 3
+            })
+        else
+            DisableHitboxExpander()
+        end
+    end,
+})
+
+UtilityTab:CreateSlider({
+    Name = "Hitbox Multiplier",
+    Range = {1.1, 3},
+    Increment = 0.1,
+    Suffix = "x Size",
+    CurrentValue = 1.5,
+    Flag = "HitboxMultiplier",
+    Callback = function(Value)
+        HitboxMultiplier = Value
+    end,
+})
+
+UtilityTab:CreateSection("Server")
+
+UtilityTab:CreateToggle({
+    Name = "Server Info",
+    CurrentValue = false,
+    Flag = "ServerInfoToggle",
+    Callback = function(Value)
+        ServerInfoEnabled = Value
+        if Value then
+            CreateServerInfoHUD()
+        elseif ServerInfoGUI then
+            ServerInfoGUI:Destroy()
+            ServerInfoGUI = nil
+        end
+    end,
+})
+
+UtilityTab:CreateButton({
+    Name = "Server Hop",
+    Callback = function()
+        ServerHop()
+        Rayfield:Notify({
+            Title = "Server Hop",
+            Content = "Searching for new server...",
+            Duration = 3
+        })
+    end,
+})
+
+
+-- Visual Tab
+VisualTab:CreateSection("Lighting")
+
+VisualTab:CreateToggle({
+    Name = "No Fog",
+    CurrentValue = false,
+    Flag = "NoFogToggle",
+    Callback = function(Value)
+        NoFogEnabled = Value
+        if Value then
+            EnableNoFog()
+        else
+            DisableNoFog()
+        end
+    end,
+})
+
+VisualTab:CreateToggle({
+    Name = "No Shadow",
+    CurrentValue = false,
+    Flag = "NoShadowToggle",
+    Callback = function(Value)
+        NoShadowEnabled = Value
+        if Value then
+            EnableNoShadow()
+            Rayfield:Notify({
+                Title = "No Shadow",
+                Content = "Shadows disabled!",
+                Duration = 3
+            })
+        else
+            DisableNoShadow()
+            Rayfield:Notify({
+                Title = "No Shadow", 
+                Content = "Shadows enabled!",
+                Duration = 3
+            })
+        end
+    end,
+})
+
+VisualTab:CreateSection("Booster")
+
+VisualTab:CreateToggle({
+    Name = "FPS Boost",
+    CurrentValue = false,
+    Flag = "FPSBoost",
+    Callback = function(Value)
+        Xres.FPSBoost = Value
+        if Value then
+            EnableFPSBoost()
+            Rayfield:Notify({
+                Title = "Performance",
+                Content = "FPS Boost Enabled",
+                Duration = 3
+            })
+        else
+            DisableFPSBoost()
+            Rayfield:Notify({
+                Title = "Performance",
+                Content = "FPS Boost Disabled",
+                Duration = 3
+            })
+        end
+    end,
+})
+
+-- ESP Tab
+ESPTab:CreateSection("Player ESP")
+
+ESPTab:CreateToggle({
+    Name = "Player ESP (Chams)",
+    CurrentValue = false,
+    Flag = "PlayerESP",
+    Callback = function(Value)
+        playerESPEnabled = Value
+        if playerESPEnabled or nametagsEnabled then
+            startESPLoop()
+        else
+            stopESPLoop()
+        end
+    end
+})
+
+ESPTab:CreateToggle({
+    Name = "Nametags",
+    CurrentValue = false,
+    Flag = "Nametags",
+    Callback = function(Value)
+        nametagsEnabled = Value
+        if playerESPEnabled or nametagsEnabled then
+            startESPLoop()
+        else
+            stopESPLoop()
+        end
+    end
+})
+
+ESPTab:CreateSection("Player ESP Color")
+
+ESPTab:CreateColorPicker({
+    Name = "Survivor Color",
+    Color = survivorColor,
+    Flag = "SurvivorCol",
+    Callback = function(c) 
+        survivorColor = c 
+    end
+})
+
+ESPTab:CreateColorPicker({
+    Name = "Killer Color",
+    Color = killerBaseColor,
+    Flag = "KillerCol",
+    Callback = function(c) 
+        killerBaseColor = c 
+    end
+})
+
+-- World Tab
+WorldTab:CreateSection("World ESP Toggles")
+
+WorldTab:CreateToggle({
+    Name = "Generators",
+    CurrentValue = false,
+    Flag = "GenESP",
+    Callback = function(Value)
+        setWorldToggle("Generator", Value)
+    end
+})
+
+WorldTab:CreateToggle({
+    Name = "Hooks", 
+    CurrentValue = false,
+    Flag = "HookESP",
+    Callback = function(Value)
+        setWorldToggle("Hook", Value)
+    end
+})
+
+WorldTab:CreateToggle({
+    Name = "Gates",
+    CurrentValue = false,
+    Flag = "GateESP",
+    Callback = function(Value)
+        setWorldToggle("Gate", Value)
+    end
+})
+
+WorldTab:CreateToggle({
+    Name = "Windows",
+    CurrentValue = false,
+    Flag = "WindowESP",
+    Callback = function(Value)
+        setWorldToggle("Window", Value)
+    end
+})
+
+WorldTab:CreateToggle({
+    Name = "Pallets",
+    CurrentValue = false,
+    Flag = "PalletESP",
+    Callback = function(Value)
+        setWorldToggle("Pallet", Value)
+    end
+})
+
+WorldTab:CreateToggle({
+    Name = "Pumpkins",
+    CurrentValue = false,
+    Flag = "PumpkinESP",
+    Callback = function(Value)
+        setWorldToggle("Pumpkin", Value)
+    end
+})
+
+WorldTab:CreateSection("World ESP Colors")
+
+WorldTab:CreateColorPicker({
+    Name = "Generators Color",
+    Color = worldColors.Generator,
+    Flag = "GenColor",
+    Callback = function(c) worldColors.Generator = c end
+})
+
+WorldTab:CreateColorPicker({
+    Name = "Hooks Color",
+    Color = worldColors.Hook,
+    Flag = "HookColor", 
+    Callback = function(c) worldColors.Hook = c end
+})
+
+WorldTab:CreateColorPicker({
+    Name = "Gates Color",
+    Color = worldColors.Gate,
+    Flag = "GateColor",
+    Callback = function(c) worldColors.Gate = c end
+})
+
+WorldTab:CreateColorPicker({
+    Name = "Windows Color",
+    Color = worldColors.Window,
+    Flag = "WindowColor",
+    Callback = function(c) worldColors.Window = c end
+})
+
+WorldTab:CreateColorPicker({
+    Name = "Pallets Color",
+    Color = worldColors.Pallet,
+    Flag = "PalletColor",
+    Callback = function(c) worldColors.Pallet = c end
+})
+
+WorldTab:CreateColorPicker({
+    Name = "Pumpkins Color",
+    Color = worldColors.Pumpkin,
+    Flag = "PumpkinColor",
+    Callback = function(c) worldColors.Pumpkin = c end
+})
+
+WorldTab:CreateButton({
+    Name = "Refresh World Objects",
+    Callback = function()
+        -- Clear existing
+        for cat, _ in pairs(worldReg) do
+            for model, entry in pairs(worldReg[cat]) do
+                removeWorldEntry(cat, model)
+            end
+        end
+        
+        -- Rescan
+        scanWorkspaceForObjects()
+        Rayfield:Notify({
+            Title = "World ESP",
+            Content = "World objects refreshed!",
+            Duration = 3
+        })
+    end
+})
+
+-- Misc Tab
+MiscTab:CreateSection("Skillcheck")
+
+MiscTab:CreateToggle({
+    Name = "No Skillchecks",
+    CurrentValue = false,
+    Flag = "NoSkill",
+    Callback = function(s) 
+        noSkillToggleUser = s 
+        evalNoSkill() 
+    end
+})
+
+-- Misc Tab
+MiscTab:CreateSection("Notifications")
+
+MiscTab:CreateToggle({
+    Name = "Killer Ability Notify",
+    CurrentValue = true,
+    Flag = "AbilityNotify",
+    Callback = function(s) 
+        abilityNotifyEnabled = s 
+    end
+})
+
+-- Teleport Tab
+UtilityTab:CreateSection("Teleport")
+
+local selectedPlayer = nil
+local playerDropdown = UtilityTab:CreateDropdown({
+    Name = "Select Player",
+    Options = {},
+    CurrentOption = "",
+    Flag = "PlayerDropdown",
+    Callback = function(Option)
+        for _, player in pairs(Players:GetPlayers()) do
+            if player.Name == Option and player ~= LocalPlayer then
+                selectedPlayer = player
+                break
+            end
+        end
+    end,
+})
+
+-- Update player list function
+local function updatePlayerList()
+    local playerNames = {}
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            table.insert(playerNames, player.Name)
+        end
+    end
+    playerDropdown:Refresh(playerNames, true)
+end
+
+-- Initial update and connect to player changes
+updatePlayerList()
+Players.PlayerAdded:Connect(updatePlayerList)
+Players.PlayerRemoving:Connect(updatePlayerList)
+
+UtilityTab:CreateButton({
+    Name = "Teleport to Selected Player",
+    Callback = function()
+        if selectedPlayer then
+            local success = TeleportToPlayer(selectedPlayer)
+            if success then
+                Rayfield:Notify({
+                    Title = "Teleport",
+                    Content = "Successfully teleported to " .. selectedPlayer.Name,
+                    Duration = 3
+                })
+            else
+                Rayfield:Notify({
+                    Title = "Teleport",
+                    Content = "Failed to teleport!",
+                    Duration = 3
+                })
+            end
+        else
+            Rayfield:Notify({
+                Title = "Teleport",
+                Content = "Please select a player first!",
+                Duration = 3
+            })
+        end
+    end,
+})
+
+-- Initialize ESP system
+for _, p in ipairs(Players:GetPlayers()) do 
+    if p ~= LocalPlayer then 
+        watchPlayer(p) 
+    end 
+end
+
+Players.PlayerAdded:Connect(watchPlayer)
+Players.PlayerRemoving:Connect(unwatchPlayer)
+
+-- Initial world scan
+scanWorkspaceForObjects()
+
+-- Character respawn handler
+LocalPlayer.CharacterAdded:Connect(function(newChar)
+    Character = newChar
+    Humanoid = newChar:WaitForChild("Humanoid")
+    RootPart = newChar:WaitForChild("HumanoidRootPart")
+    wait(1)
+    
+LocalPlayer.CharacterAdded:Connect(function(newChar)
+    Character = newChar
+    Humanoid = newChar:WaitForChild("Humanoid")
+    RootPart = newChar:WaitForChild("HumanoidRootPart")
+    wait(1)
+        
+    Humanoid.WalkSpeed = Xres.WalkSpeed
+    
+    
+    if NoShadowEnabled then
+        for _, part in pairs(Character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CastShadow = false
+            end
+        end
+    end
+    
+    -- Existing code...
+end)
+
+-- Auto apply ke player baru
+Players.PlayerAdded:Connect(function(player)
+    player.CharacterAdded:Connect(function(char)
+        if NoShadowEnabled then
+            wait(1)
+            for _, part in pairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.CastShadow = false
+                end
+            end
+        end
+    end)
+end)
+    
+    if Humanoid then
+        Humanoid.WalkSpeed = Xres.WalkSpeed
+    end
+    if Xres.NoClip then EnableNoClip() end
+    if Xres.InfinityJump then EnableInfinityJump() end
+    if Xres.AntiAFK then EnableAntiAFK() end
+    if Xres.GodMode then EnableGodMode() end
+end)
+
+-- Auto God Mode
+ReplicatedStorage.DescendantAdded:Connect(function(obj)
+    if Xres.GodMode and obj.Name == "VitalityBridge" then
+        obj:Destroy()
+    end
+end)
+
+LocalPlayer:GetPropertyChangedSignal("Team"):Connect(evalNoSkill)
+
+evalNoSkill()
+
+-- Auto detect remotes untuk Killer Ability Notify
+for _, d in ipairs(ReplicatedStorage:GetDescendants()) do 
+    if d:IsA("RemoteEvent") or d:IsA("BindableEvent") then 
+        connectRemote(d) 
+    end 
+end
+
+ReplicatedStorage.DescendantAdded:Connect(function(d) 
+    if d:IsA("RemoteEvent") or d:IsA("BindableEvent") then 
+        connectRemote(d) 
+    end 
+end)
+
+-- Initial setup
+wait(1)
+if Humanoid then
+    Humanoid.WalkSpeed = Xres.WalkSpeed
+end
+
+Rayfield:Notify({
+    Title = "Xres",
+    Content = "Successfully loaded!",
+    Duration = 3
+})
